@@ -1,0 +1,87 @@
+---
+title: "Untitled"
+author: "Ethan Carpenter"
+date: "8/6/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+source('nba_api.R')
+source('tools.R')
+source('element_gradient_setup.R')
+source('game_flow.R')
+library(dplyr)
+library(zoo)
+library(runner)
+library(ggplot2)
+library(RSQLite)
+library(png)
+library(teamcolors)
+library(tidyverse)
+options(max.print = 25)
+id <- '0021901263'
+pbp_dt <- get_pbp_data(id, '2020-08-05') %>%
+    select(player_code, person_id, description, period, clock, team_abr) %>%
+    filter(stringr::str_detect(description, 'Substitution')) %>%
+    mutate(players=stringr::str_split(description, ' Substitution replaced by '),
+           EnterPlayer=purrr::map_chr(players, 2),
+           ExitPlayer=purrr::map_chr(players, 1),
+           ExitPlayer=purrr::map_chr(stringr::str_split(ExitPlayer, '] '), 2),
+           clock=sapply(clock, str_time_to_secs),
+           period=as.integer(period),
+           secElapsed=pmin(period, 4)*60*12 + pmax(period-4, 0)*60*5 - clock) %>%
+    select(-period, -clock, -description, -players)
+```
+
+```{r cars}
+player <- 'Harris'
+dt <- pbp_dt %>%
+    filter((EnterPlayer==player) | (ExitPlayer==player)) %>%
+    mutate(action=(EnterPlayer==player)-(ExitPlayer==player)) %>%
+    select(secElapsed, action) %>%
+    arrange(secElapsed)
+  
+dt <- .handle_first_sub_at_quarter(dt)
+dt <- .handle_start(dt)
+
+temp <- dt %>%
+  mutate(prev_action=lag(action),
+         prev_sec=lag(secElapsed)) %>%
+  filter(prev_action==action) %>%
+  mutate(secElapsed=round((secElapsed+prev_sec)/2/12/60)*12*60,
+         action=-action) %>%
+  select(secElapsed, action)
+
+dt <- temp %>%
+  rbind(dt) %>%
+  arrange(secElapsed) %>%
+  full_join(data.frame(secElapsed=1:2880), by=c('secElapsed')) %>%
+  mutate(is_in_game=0) %>%
+  arrange(secElapsed)
+
+first_in_game <- dt %>%
+  drop_na() %>%
+  head(1) %>%
+  select(secElapsed) %>%
+  unlist()
+dt <- zoo::na.locf(dt, fromLast = FALSE) %>%
+  mutate(is_in_game=(action==1)) %>%
+  select(secElapsed, is_in_game) %>%
+  rbind(data.frame(secElapsed=0:first_in_game,
+                   is_in_game=0)) %>%
+  arrange(secElapsed) %>%
+  distinct() %>%
+  group_by(secElapsed) %>%
+  summarize(is_in_game=sum(is_in_game)) %>%
+  ungroup()
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

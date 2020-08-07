@@ -1,0 +1,120 @@
+---
+title: "single game player scoring"
+author: "Ethan Carpenter"
+date: "8/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+source('nba_api.R')
+source('tools.R')
+source('element_gradient_setup.R')
+source('game_flow.R')
+library(dplyr)
+library(zoo)
+library(tidyverse)
+library(runner)
+library(ggplot2)
+library(png)
+library(teamcolors)
+extrafont::loadfonts(quiet=TRUE)
+```
+
+```{r cars}
+date <- '2020-08-05'
+win_size_sec <- 60 * 6
+
+games_dt <- get_games(date, c(2, 3))
+colors_master <- get_colors_master()
+font_color <- 'white'
+font_family <- 'Verdana'
+span <- 0.25
+
+game_id <- '0021901242'
+player <- 'Joel Embiid'
+color <- '#ed174c'
+player_code <- sub(' ', '_', tolower(player))
+game <- games_dt[games_dt$gameId == game_id, ]
+
+pbp_dt <- get_pbp_data(game_id, date)  %>% 
+        mutate(clock=sapply(clock, str_time_to_secs)) %>% 
+        mutate(period=as.integer(period),
+               clock=as.integer(clock),
+               home_score=as.integer(home_score),
+               visitor_score=as.integer(visitor_score)) %>%
+        mutate(secElapsed=pmin(period, 4)*60*12 + pmax(period-4, 0)*60*5 - clock,
+               home_pts=home_score-lag(home_score, 1),
+               away_pts=visitor_score-lag(visitor_score, 1)) %>%
+        filter(home_pts + away_pts > 0) %>%
+        filter(player_code == player_code)
+
+# colors <- list(home=colors_master[colors_master$Abbreviation==games$hTeam, 'primary_color'][[1]],
+#                      away=colors_master[colors_master$Abbreviation==games$vTeam, 'primary_color'][[1]])
+
+is_player_home <- pbp_dt[1, 'home_pts'] > 0
+pbp_dt <- pbp_dt %>%
+  mutate(player_pts=ifelse(is_player_home, home_pts, away_pts)) %>% 
+  mutate(player_per_48=36*60/win_size_sec * sum_run(player_pts, k=win_size_sec, idx=secElapsed))
+
+# color <- ifelse(is_player_home, 
+#                 colors$home, 
+#                 colors$away)
+
+
+player_id <- pbp_dt$person_id[[1]]
+
+p <- ggplot(pbp_dt) +
+  geom_line(aes(x=secElapsed, y=player_per_48, color='Home'), 
+              se=FALSE, span=span, color=color, size=2) +
+  scale_x_continuous(labels=c('Q1', 'Q2', 'Q3', 'Q4', 'OT'), 
+                     breaks=c(12*60*0.5, 12*60*1.5, 12*60*2.5, 12*60*3.5, 12*60*4+5*60*0.5),
+                     minor_breaks = c()) +
+  theme(plot.background = element_rect(fill=color),
+        text = element_text(color=font_color,
+                            face='bold',
+                            family=font_family),
+        axis.text = element_text(color=font_color,
+                                 face='bold',
+                                 family=font_family),
+        legend.position = 'none',
+        axis.ticks = element_line(color='transparent'),
+        plot.caption = element_text(size=8),
+        plot.tag.position = c(.08, .01),
+        plot.tag = element_text(size=8)) +
+  labs(x = "", 
+       y = "Points per 36 Minutes",
+       title = paste("Game Flow:", player, "Scoring"),
+       subtitle = format(as.Date(date), '%b. %e, %Y'),
+       caption = "Source: NBA.com",
+       tag = '@ethan9carpenter') +
+  theme()
+
+p <- neat_y_axis(p)
+p <- add_rects(p)
+
+bounds <- get_plot_bounds(p)
+
+
+player_pic <- get_player_headshot(player_id)
+
+width <- ncol(player_pic)
+height <- nrow(player_pic)
+
+x_scale <- (bounds$xmax-bounds$xmin) / (bounds$ymax-bounds$ymin) * width / height * .625
+
+x_width <- 800 / 2 * (bounds$xmax-bounds$xmin) / 2880
+x_shift <- -200 * (bounds$xmax-bounds$xmin) / 2880
+y_height <- x_width / x_scale
+
+p <- p +
+  annotation_raster(player_pic,
+                    ymin=120 - y_height,
+                    ymax=120 +  y_height,
+                    xmin=bounds$xmax - x_width + x_shift,
+                    xmax=bounds$xmax + x_width + x_shift)
+
+#if (show)    
+p %>% show()
+#if (save)
+ggsave(paste0('player_game_plots/', date, '-', player_code, '-off_plot.png'), dpi=300)
+```

@@ -1,0 +1,58 @@
+---
+title: "bubble"
+author: "Ethan Carpenter"
+date: "7/30/2020"
+output: html_document
+---
+
+```{r include=FALSE}
+source('nba_api.R')
+source('tools.R')
+source('element_gradient_setup.R')
+source('game_flow.R')
+library(dplyr)
+library(zoo)
+library(runner)
+library(ggplot2)
+library(png)
+library(teamcolors)
+library(RSQLite)
+extrafont::loadfonts(quiet=TRUE)
+begin_modifying()
+```
+
+```{r warning=FALSE}
+#I have games starting in the 15-16 season
+date <- '2020-08-06'
+win_size_sec <- 60
+
+games_dt <- get_games(date, c(2, 3))
+colors_master <- get_colors_master()
+font_color <- 'white'
+font_family <- 'Verdana'
+span <- 0.4
+
+for (i in 1:nrow(games_dt)){
+  game <- games_dt[i, ]
+  game_flow_plot(game, font_family, font_color, colors_master, win_size_sec, span, save=TRUE, show=TRUE)
+}
+
+# add ability to filter by quarter
+# add time left / final to subtitle or title
+# move team logos towards middle of screen to avoid going off
+```
+
+```{r}
+end_modifying()
+```
+
+```{r}
+unlockBinding("validate_element", asNamespace('ggplot2'))
+assign("validate_element", custom_validate_element, asNamespace('ggplot2'))
+lockBinding("validate_element", asNamespace('ggplot2'))
+
+unlockBinding("merge_element.element", asNamespace('ggplot2'))
+assign("merge_element.element", custom_merge_element, asNamespace('ggplot2'))
+lockBinding("merge_element.element", asNamespace('ggplot2'))
+```
+
