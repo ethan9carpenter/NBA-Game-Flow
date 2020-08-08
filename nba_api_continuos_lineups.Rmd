@@ -22,17 +22,17 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-id <- '0021901271'
-dt <- get_continous_lineups(id, '2020-08-06')
-player_codes <- get_pbp_data(id, '2020-08-06') %>%
-    filter(str_detect(description, 'shot') |
-             str_detect(description, 'Substitution') |
-             str_detect(description, 'Rebound')) %>%
+# issues when a player subs in at the end of the game, finishes the game, but does not have any instance of doing anything
+game_id <- '0021901278'
+game_date <- '2020-08-07'
+team <- 'NOP'
+
+dt <- get_continous_lineups(game_id, game_date, team)
+player_codes <- get_pbp_data(game_id, game_date) %>%
     select(person_id, player_code, team_abr) %>%
     distinct() %>%
     filter(str_detect(player_code, '_')) %>%
-    mutate(player_code=map_chr(str_split(player_code, '_'), 2),
-           player_code=tools::toTitleCase(player_code))
+    mutate(player_code=map_chr(str_split(player_code, '_'), 2))
 colors_master <- get_colors_master()
 
 new_dt <- data.frame(player=character(),
@@ -41,7 +41,6 @@ new_dt <- data.frame(player=character(),
                      person_id=character(),
                      team_abr=character(),
                      seconds=numeric())
-team <- 'LAC'
 
 player_codes %>% arrange(player_code) %>% filter(team_abr==team) %>% rmarkdown::paged_table(
 )
@@ -57,7 +56,6 @@ color <- colors_master %>%
 player_codes <- player_codes %>%
   filter(team_abr==team)
 colnames(dt) <- map_chr(str_split(colnames(dt), ' '), 1)
-colnames(dt) <- tools::toTitleCase(tolower(colnames(dt)))
 dt <- dt[, colnames(dt) %in% player_codes$player_code]
 
 for (i in 1:length(colnames(dt))){
@@ -87,7 +85,8 @@ labels <- plot_dt %>%
   arrange(n) %>%
   select(player) %>% 
   distinct() %>%
-  unlist()
+  unlist() %>%
+  as.vector()
 
 p <- ggplot(plot_dt) +
   geom_rect(aes(xmin=n-1,
@@ -97,10 +96,9 @@ p <- ggplot(plot_dt) +
             fill=color
             ) +
   theme(legend.position = 'none',
-        panel.grid.major.x = element_blank(),
-        plot.background = element_gradient('white', 'white')) +
+        panel.grid.major.x = element_blank()) +
   scale_y_continuous(breaks=1:4 * 720, labels=c('End Q1', 'End Q2', 'End Q3', 'End Q4')) +
-  scale_x_continuous(labels=labels,
+  scale_x_continuous(labels=tools::toTitleCase(labels),
                      breaks=1:length(labels) - 0.5)
 
 for (i in 1:max(plot_dt$n)){
@@ -109,7 +107,7 @@ for (i in 1:max(plot_dt$n)){
     select(person_id) %>%
     distinct() %>%
     unlist()
-  
+
   if (length(player_code) > 0)
     p <- p +
       annotation_raster(get_player_headshot(player_code),
@@ -119,26 +117,33 @@ for (i in 1:max(plot_dt$n)){
 }
 #new_dt %>% rmarkdown::paged_table()
 p
-ggsave(paste0(team, id,'substitution_plots/sample_player_plot.png'))
+ggsave(paste0('substitution_plots/', team, game_id, 'sub_plot.png'))
 ```
 ```{r}
-sec_dt <- plot_dt %>%
+plot_dt %>%
+  distinct() %>%
   group_by(seconds) %>%
   summarize(n=sum(in_game)) %>%
-  arrange(-n)
-max(sec_dt$n)
-min(sec_dt$n)
-pbp_dt %>%
-  rmarkdown::paged_table()
-
-ggplot(sec_dt, aes(y=n, x=seconds)) +
-  theme(plot.background = element_gradient()) +
+  arrange(-n) %>%
+  ggplot(aes(y=n, x=seconds)) +
   geom_line() +
   scale_x_continuous(breaks=seq(1, 4)*12*60, labels=c('1Q', '2q', '3q', '4q'))
+pbp_dt %>%
+  filter(team_abr==team) %>%
+  rmarkdown::paged_table()
+new_dt %>%
+  filter(player=='Wright-Foreman') %>%
+  rmarkdown::paged_table()
 ```
 ```{r}
+pbp_dt
 pbp_dt %>%
-  filter(team_abr=='NOP') %>%
-  filter(EnterPlayer == 'Melli' | ExitPlayer == 'Melli')
+  filter(! (ExitPlayer %in% player_codes$player_code))
+```
+
+```{r}
+dt %>%
+  filter(secElapsed %in% 1400:2200) %>%
+  rmarkdown::paged_table()
 ```
 

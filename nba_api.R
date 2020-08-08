@@ -53,36 +53,15 @@ get_player_action_shot <- function(player_id){
   return (img)
 }
 
-get_continous_lineups <- function(game_id, game_date){
-  fourth_pbp_players <- get_pbp_data(game_id, game_date) %>%
-    filter(period==4, player_code!='') %>%
-    select(player_code) %>%
-    distinct() %>%
-    mutate(player_code=map_chr(str_split(player_code, '_'), 2),
-           player_code=tools::toTitleCase(player_code))
-  first_pbp_players <- get_pbp_data(game_id, game_date) %>%
-    filter(period==1, player_code!='') %>%
-    select(player_code) %>%
-    distinct() %>%
-    mutate(player_code=map_chr(str_split(player_code, '_'), 2),
-           player_code=tools::toTitleCase(player_code))
-  third_pbp_players <- get_pbp_data(game_id, game_date) %>%
-    filter(period==3, player_code!='') %>%
-    select(player_code) %>%
-    distinct() %>%
-    mutate(player_code=map_chr(str_split(player_code, '_'), 2),
-           player_code=tools::toTitleCase(player_code))
-  second_pbp_players <- get_pbp_data(game_id, game_date) %>%
-    filter(period==2, player_code!='') %>%
-    select(player_code) %>%
-    distinct() %>%
-    mutate(player_code=map_chr(str_split(player_code, '_'), 2),
-           player_code=tools::toTitleCase(player_code))
+get_continous_lineups <- function(game_id, game_date, team){
+  master_pbp_dt <- get_pbp_data(game_id, game_date) %>%
+    filter(team_abr==team) %>%
+    mutate_if(is.character, tolower)
     
-  pbp_dt <- get_pbp_data(game_id, game_date) %>%
+  pbp_dt <- master_pbp_dt %>%
     select(player_code, person_id, description, period, clock, team_abr) %>%
-    filter(stringr::str_detect(description, 'Substitution')) %>%
-    mutate(players=stringr::str_split(description, ' Substitution replaced by '),
+    filter(stringr::str_detect(description, 'substitution')) %>%
+    mutate(players=stringr::str_split(description, ' substitution replaced by '),
            EnterPlayer=purrr::map_chr(players, 2),
            ExitPlayer=purrr::map_chr(players, 1),
            ExitPlayer=purrr::map_chr(stringr::str_split(ExitPlayer, '] '), 2),
@@ -98,9 +77,7 @@ get_continous_lineups <- function(game_id, game_date){
     unique()
   
   for (player in players){
-    minutes <- nba_api_get_player_continuous_minutes(player, pbp_dt, fourth_pbp_players, 
-                                                     first_pbp_players, third_pbp_players,
-                                                     second_pbp_players) %>%
+    minutes <- nba_api_get_player_continuous_minutes(player, pbp_dt, master_pbp_dt) %>%
       mutate(!!player := is_in_game) %>%
       select(-is_in_game)
     all_minutes <- all_minutes %>%
@@ -115,141 +92,99 @@ get_continous_lineups <- function(game_id, game_date){
 # nba_api_get_player_continuous_minutes
 #################
 
-.fourth_quarter_checker <- function(dt, fourth_pbp_players, player){
-  #if last sub before fourth and last action ==1
-  #   if description exists in fourth quarter
-  #       then add sub at start of fourth
-  last_row <- dt[nrow(dt), ] %>%
-    unlist()
+.handle_quarter_sits <- function(sub_dt, master_pbp_dt, player){
+  pbp_dt <- master_pbp_dt %>%
+    select(period, player_code) %>%
+    distinct() %>%
+    filter(player_code != '') %>%
+    mutate(player_code=map_chr(str_split(player_code, '_'), 2),
+           player_code=player_code,
+           period=as.integer(period))
   
-  if (last_row['secElapsed'] < 60 * 12 * 3 & last_row['action'] == -1 & player %in% fourth_pbp_players$player_code){
-      dt <- dt %>%
-        rbind(data.frame(secElapsed=12*60*3,
-                         action=1))
-  }
-  dt
+  sub_dt <- sub_dt %>%
+    mutate(is_quarter=  secElapsed %% 720 == 0,
+           is_next_quarter= lead(secElapsed) %% 720 == 0,
+           is_prev_quarter= lag(secElapsed) %% 720 == 0)
+  sub_dt[is.na(sub_dt)] <- FALSE
+  
+  sub_dt$is_in_next_quarter <- sapply(sub_dt$secElapsed, function(x){
+    quarter <- ceiling(x/720) + 1
+    data <- pbp_dt %>%
+      filter(period==quarter,
+             player_code==player)
+    return (nrow(data) == 1)
+  })
+
+  sub_dt %>%
+    filter(! (is_quarter & is_next_quarter & is_prev_quarter & !is_in_next_quarter)) %>%
+    select(secElapsed, action)
 }
 
-.handle_start <- function(dt){
-  if (dt[1, 'action'] == -1){
-    dt <- list(secElapsed=floor(min(dt$secElapsed-1)/12/60)*12*60,
-               action=1) %>%
-      rbind(dt)
-  }
-  dt
-}
-
-.third_quarter_checker <- function(dt, third_pbp_players, player){
-  if (length(dt[dt$secElapsed==1440, 'action']) > 0){
-    if(dt[dt$secElapsed==1440, 'action'] == -1 & 
-       length(dt[dt$secElapsed==2160, 'action'])==0 & 
-       player %in% third_pbp_players$player_code){
-      dt <- dt %>%
-        filter(secElapsed!=1440) %>%
-        rbind(data.frame(secElapsed=2160,
-                         action=-1)) %>%
-        arrange(secElapsed)
-    }
-  }
-  dt
-}
-
-.second_quarter_checker <- function(dt, second_pbp_players, player){
-    if(dt[dt$secElapsed==720, 'action'] == -1 & 
-       length(dt[dt$secElapsed==1440, 'action'])==0 & 
-       player %in% third_pbp_players$player_code){
-      dt <- dt %>%
-        filter(secElapsed!=720) %>%
-        rbind(data.frame(secElapsed=1440,
-                         action=-1)) %>%
-        arrange(secElapsed)
-    }
-  dt
-}
-
-.handle_first_sub_at_quarter <- function(dt, first_pbp_players, player){
-  if (dt[1, 'secElapsed'] > 12*60 & player %in% first_pbp_players$player_code){
-    dt <- data.frame(secElapsed=floor(dt[1, 'secElapsed']/12/60)*12*60,
-                     action=-dt[1, 'action']) %>%
-      rbind(dt)
-  }
-  dt
-}
-
-nba_api_get_player_continuous_minutes <- function(player, dt, fourth_pbp_players, first_pbp_players,
-                                                  third_pbp_players, second_pbp_players){
-  dt <- dt %>%
+nba_api_get_player_continuous_minutes <- function(player, pbp_dt, master_pbp_dt){
+  dt <- pbp_dt %>%
     filter((EnterPlayer==player) | (ExitPlayer==player)) %>%
     mutate(action=(EnterPlayer==player)-(ExitPlayer==player)) %>%
     select(secElapsed, action) %>%
-    arrange(secElapsed)
+    arrange(secElapsed) %>%
+    rbind(data.frame(secElapsed=c(0, 720, 720, 1440, 1440, 2160, 2160, 2880),
+                     action=c(1, 1, -1, 1, -1, 1, -1, -1))) %>%
+    arrange(secElapsed, action)
+  
+  temp <- dt %>%
+    mutate(next_action=lead(action),
+           next_sec=lead(secElapsed))
+  
+  to_rem <- data.frame(secElapsed=numeric(), action=numeric())
+  
+  for (i in 1:(nrow(temp)-1)){
+    if (temp[i, 'action'] == temp[i, 'next_action']){
+      if(temp[i, 'secElapsed'] %% 720 == 0){
+        to_rem <- to_rem %>%
+          rbind(data.frame(secElapsed=temp[i, 'secElapsed'],
+                           action=temp[i, 'action']))
+      } else {
+        to_rem <- to_rem %>%
+          rbind(data.frame(secElapsed=temp[i, 'next_sec'],
+                           action=temp[i, 'next_action']))
+      }
+    }
+  }
+  to_rem <- to_rem %>%
+    distinct()
+  
+  if (nrow(to_rem) > 0)
+    for (i in 1:nrow(to_rem)){
+      dt <- dt %>%
+        filter(secElapsed != to_rem[i, 'secElapsed'] |
+               action != to_rem[i, 'action'])
+    }
+  
+  # deal with players sitting entire quarters here
+  dt <- .handle_quarter_sits(dt, master_pbp_dt, player)
 
-  #dt <- .handle_first_sub_at_quarter(dt, first_pbp_players, player)
-  dt <- .handle_start(dt)
+  temp <- master_pbp_dt %>%
+    select(period, player_code) %>%
+    distinct() %>%
+    filter(player_code != '') %>%
+    mutate(player_code=map_chr(str_split(player_code, '_'), 2),
+           player_code=player_code,
+           period=as.integer(period)) 
   
+  # dt <- dt %>%
+  #   mutate(avg_with_next_q=secElapsed + zoo::na.fill(lead(secElapsed), 2880),
+  #          avg_with_next_q=ceiling(avg_with_next_q/720/2)) %>%
+  #   filter(secElapsed %% 720 ==0 & 
+  #            lead(secElapsed) %% 720 == 0 & 
+  #            action == -1 &
+  #            avg_with_next_q %in% ())
+  #experimental
+  # dt <- dt %>%
+  #   filter(!(secElapsed %% 720 == 0 & lag(secElapsed) %% 720 == 0  & action == -1)) %>%
+  #   filter(!(secElapsed %% 720 == 0 & lead(secElapsed) %% 720 == 0  & action == 1))
 
-  quarter_break_sub <- dt %>%
-    mutate(prev_action=lag(action),
-           prev_sec=lag(secElapsed)) %>%
-    filter(prev_action==action) %>%
-    mutate(quarter_end=floor((secElapsed+prev_sec)/2/12/60),
-           action=-action) %>%
-    select(quarter_end, action) %>%
-    filter(action==1)
-  
-  if (!(player %in% third_pbp_players$player_code)){
-    quarter_break_sub <- quarter_break_sub %>%
-      mutate(quarter_end=ifelse(quarter_end==2, 3, quarter_end))
-  }
-  if (!(player %in% second_pbp_players$player_code)){
-    quarter_break_sub <- quarter_break_sub %>%
-      mutate(quarter_end=ifelse(quarter_end==1, 2, quarter_end))
-  }
-  if (!(player %in% first_pbp_players$player_code)){
-    quarter_break_sub <- quarter_break_sub %>%
-      mutate(quarter_end=ifelse(quarter_end==1, 2, quarter_end))
-  }
-  dt <- quarter_break_sub %>%
-    mutate(quarter_end=720*quarter_end) %>%
-    rename(secElapsed=quarter_end) %>%
-    rbind(dt) %>%
-    arrange(secElapsed)
-  
-  quarter_break_sub <- dt %>%
-    mutate(prev_action=lag(action),
-           prev_sec=lag(secElapsed)) %>%
-    filter(prev_action==action) %>%
-    mutate(quarter_end=floor((secElapsed+prev_sec)/2/12/60),
-           action=-action) %>%
-    select(quarter_end, action) %>%
-    filter(action==-1)
-  
-  if (!(player %in% third_pbp_players$player_code)){
-    quarter_break_sub <- quarter_break_sub %>%
-      mutate(quarter_end=ifelse(quarter_end==3, 4, quarter_end))
-  }
-  if (!(player %in% second_pbp_players$player_code)){
-    quarter_break_sub <- quarter_break_sub %>%
-      mutate(quarter_end=ifelse(quarter_end==2, 3, quarter_end))
-  }
-  if (!(player %in% first_pbp_players$player_code)){
-    quarter_break_sub <- quarter_break_sub %>%
-      mutate(quarter_end=ifelse(quarter_end==1, 2, quarter_end))
-  }
-  
-
-  dt <- quarter_break_sub %>%
-    mutate(quarter_end=720*quarter_end) %>%
-    rename(secElapsed=quarter_end) %>%
-    rbind(dt) %>%
-    arrange(secElapsed)
-  #dt <- .second_quarter_checker(dt, second_pbp_players, player)
-  #dt <- .third_quarter_checker(dt, third_pbp_players, player)
-  #dt <- .fourth_quarter_checker(dt, fourth_pbp_players, player)
-  
     
   dt <- dt %>%
-    full_join(data.frame(secElapsed=1:2880), by=c('secElapsed')) %>%
+    full_join(data.frame(secElapsed=0:2880), by=c('secElapsed')) %>%
     mutate(is_in_game=0) %>%
     arrange(secElapsed)
   
@@ -268,6 +203,22 @@ nba_api_get_player_continuous_minutes <- function(player, dt, fourth_pbp_players
     group_by(secElapsed) %>%
     summarize(is_in_game=sum(is_in_game)) %>%
     ungroup()
+  
+  # Sat first quarter
+  for (i in 0:3){
+    temp <- master_pbp_dt %>%
+      select(period, player_code) %>%
+      distinct() %>%
+      filter(player_code != '') %>%
+      mutate(player_code=map_chr(str_split(player_code, '_'), 2),
+             player_code=player_code,
+             period=as.integer(period)) %>%
+      filter(period==i+1,
+             player_code==player)
+    if (dt[1+720*i, 'is_in_game'] == 1 & nrow(temp) == 0){
+      dt[(1+720*i):(720*(i+1)), 'is_in_game'] <- 0
+    }
+  }
   
   return (dt)
 }

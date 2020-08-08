@@ -23,6 +23,23 @@ game_flow_plot <- function(game, font_family, font_color, colors_master, win_siz
                                    colors$home,
                                    colors$away)
     bottom_background_color <- ifelse(top_background_color == colors$home, colors$away, colors$home)
+    dt <- pbp_dt %>%
+      select(secElapsed, home_per_48, away_per_48) %>%
+      mutate(seconds=secElapsed-lag(secElapsed),
+             seconds=ifelse(is.na(seconds), secElapsed, seconds),
+             home_lead=home_per_48 > away_per_48,
+             away_lead=home_per_48 < away_per_48) %>%
+      group_by(home_lead, away_lead) %>%
+      summarize(leading=sum(seconds)) %>%
+      ungroup() %>%
+      mutate(leading=leading/sum(leading)) %>%
+      filter(home_lead | away_lead) %>%
+      mutate(abbr=ifelse(home_lead & !away_lead, game$hTeam, game$vTeam)) %>%
+      select(abbr, leading) %>%
+      arrange(-leading)
+    
+    percent_playing_better_text <- paste(dt[1, 'abbr'], scales::percent(unlist(dt[1, 'leading'])), '-',
+                                  dt[2, 'abbr'], scales::percent((unlist(dt[2, 'leading']))))
     
     p <- ggplot(pbp_dt) +
       geom_smooth(aes(x=secElapsed, y=home_per_48, color='Home'), 
@@ -50,7 +67,7 @@ game_flow_plot <- function(game, font_family, font_color, colors_master, win_siz
       labs(x = "", 
            y = "Points per 48 Minutes",
            title = paste("Game Flow:", game$hTeam, final_score$home, '-', game$vTeam, final_score$away),
-           subtitle = format(as.Date(date), '%b. %e, %Y'),
+           subtitle = paste(percent_playing_better_text, '\t', format(as.Date(date), '%b. %e, %Y')),
            caption = "Source: NBA.com",
            tag = '@ethan9carpenter')
   
@@ -65,7 +82,8 @@ game_flow_plot <- function(game, font_family, font_color, colors_master, win_siz
     if (save)
       ggsave(paste0('game_plots/', date, '-', game$hTeam, '-', game$vTeam, '-off_plot.png'), dpi=300)
   }
-  return (p)
+  return (list(plot=p,
+               dt=pbp_dt))
 }
 
 neat_y_axis <- function(p){

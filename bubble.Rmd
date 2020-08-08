@@ -23,23 +23,37 @@ begin_modifying()
 
 ```{r warning=FALSE}
 #I have games starting in the 15-16 season
-date <- '2020-08-06'
-win_size_sec <- 60
+date <- '2020-08-07'
+win_size_sec <- 60 * 3
 
 games_dt <- get_games(date, c(2, 3))
 colors_master <- get_colors_master()
 font_color <- 'white'
 font_family <- 'Verdana'
-span <- 0.4
+span <- 0.5
 
 for (i in 1:nrow(games_dt)){
   game <- games_dt[i, ]
-  game_flow_plot(game, font_family, font_color, colors_master, win_size_sec, span, save=TRUE, show=TRUE)
+  game_flow <- game_flow_plot(game, font_family, font_color, 
+                              colors_master, win_size_sec, span, save=TRUE, show=TRUE)
+  dt <- game_flow$dt
 }
 
+# add game script
 # add ability to filter by quarter
 # add time left / final to subtitle or title
 # move team logos towards middle of screen to avoid going off
+```
+```{r}
+dt %>%
+  select(secElapsed, home_per_48, away_per_48) %>%
+  mutate(seconds=secElapsed-lag(secElapsed),
+         seconds=ifelse(is.na(seconds), secElapsed, seconds),
+         home_lead=home_per_48 > away_per_48) %>%
+  group_by(home_lead) %>%
+  summarize(seconds_leading=sum(seconds)) %>%
+  ungroup() %>%
+  mutate(percent_leading=seconds_leading/sum(seconds_leading))
 ```
 
 ```{r}
