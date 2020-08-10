@@ -23,14 +23,13 @@ begin_modifying()
 
 ```{r warning=FALSE}
 #I have games starting in the 15-16 season
-date <- '2020-08-07'
+date <- '2020-08-09'
 win_size_sec <- 60 * 3
 
 games_dt <- get_games(date, c(2, 3))
 colors_master <- get_colors_master()
-font_color <- 'white'
 font_family <- 'Verdana'
-span <- 0.5
+span <- 0.4
 
 for (i in 1:nrow(games_dt)){
   game <- games_dt[i, ]

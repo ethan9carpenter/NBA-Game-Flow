@@ -10,6 +10,8 @@ source('nba_api.R')
 source('tools.R')
 source('element_gradient_setup.R')
 source('game_flow.R')
+source('continuous_minutes.R')
+source('name_handler.R')
 library(dplyr)
 library(zoo)
 library(runner)
@@ -23,102 +25,26 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # issues when a player subs in at the end of the game, finishes the game, but does not have any instance of doing anything
-game_id <- '0021901278'
-game_date <- '2020-08-07'
-team <- 'NOP'
+# 
+# Analyze closing vs. starting lineups
+# Add minutes player, +/-
+# Deal with OT
+# Add small plot at bottom that shows rolling +/-
 
-dt <- get_continous_lineups(game_id, game_date, team)
-player_codes <- get_pbp_data(game_id, game_date) %>%
-    select(person_id, player_code, team_abr) %>%
-    distinct() %>%
-    filter(str_detect(player_code, '_')) %>%
-    mutate(player_code=map_chr(str_split(player_code, '_'), 2))
+font_color <- 'white'
+font_family <- 'Verdana'
+game_date <- '2020-08-09'
+
+games_dt <- get_games(game_date, c(2, 3))
 colors_master <- get_colors_master()
 
-new_dt <- data.frame(player=character(),
-                     in_game=numeric(),
-                     n=numeric(),
-                     person_id=character(),
-                     team_abr=character(),
-                     seconds=numeric())
-
-player_codes %>% arrange(player_code) %>% filter(team_abr==team) %>% rmarkdown::paged_table(
-)
+for (game_id in games_dt$gameId){
+  pbp_dt <- get_pbp_data(game_id, game_date) %>% 
+    handle_names()
+  get_substitution_plots(pbp_dt, font_family, colors_master, show=TRUE, save=TRUE)
+}
 ```
 
-
-
-```{r}
-color <- colors_master %>%
-  filter(Abbreviation==team) %>%
-  select(primary_color) %>%
-  unlist()
-player_codes <- player_codes %>%
-  filter(team_abr==team)
-colnames(dt) <- map_chr(str_split(colnames(dt), ' '), 1)
-dt <- dt[, colnames(dt) %in% player_codes$player_code]
-
-for (i in 1:length(colnames(dt))){
-  col <- colnames(dt)[[i]]
-  
-  player_info <- player_codes %>%
-    filter(player_code==col) %>%
-    select(person_id, team_abr) %>%
-    distinct()
-  if (length(player_info) > 1)
-    player_info <- player_info[1, ]
-  
-  new_dt <- new_dt %>%
-    rbind(data.frame(player=col,
-                     in_game=dt[[col]],
-                     n=i,
-                     person_id=player_info$person_id,
-                     team_abr=player_info$team_abr,
-                     seconds=0:(nrow(dt)-1)))
-}
-
-plot_dt <- new_dt %>%
-  drop_na() %>%
-  filter(in_game==1,
-         team_abr==team)
-labels <- plot_dt %>% 
-  arrange(n) %>%
-  select(player) %>% 
-  distinct() %>%
-  unlist() %>%
-  as.vector()
-
-p <- ggplot(plot_dt) +
-  geom_rect(aes(xmin=n-1,
-                xmax=n,
-                ymin=seconds,
-                ymax=seconds+1),
-            fill=color
-            ) +
-  theme(legend.position = 'none',
-        panel.grid.major.x = element_blank()) +
-  scale_y_continuous(breaks=1:4 * 720, labels=c('End Q1', 'End Q2', 'End Q3', 'End Q4')) +
-  scale_x_continuous(labels=tools::toTitleCase(labels),
-                     breaks=1:length(labels) - 0.5)
-
-for (i in 1:max(plot_dt$n)){
-  player_code <- plot_dt %>%
-    filter(n==i) %>%
-    select(person_id) %>%
-    distinct() %>%
-    unlist()
-
-  if (length(player_code) > 0)
-    p <- p +
-      annotation_raster(get_player_headshot(player_code),
-                        i-1, i,
-                        0, 400
-                        )
-}
-#new_dt %>% rmarkdown::paged_table()
-p
-ggsave(paste0('substitution_plots/', team, game_id, 'sub_plot.png'))
-```
 ```{r}
 plot_dt %>%
   distinct() %>%
@@ -142,8 +68,9 @@ pbp_dt %>%
 ```
 
 ```{r}
-dt %>%
-  filter(secElapsed %in% 1400:2200) %>%
-  rmarkdown::paged_table()
+d1 <- data.frame(a=c(1, 2), b=c('a', 'b'))
+d2 <- data.frame(a=c(1, 3), b=c('a', 'c'))
+d1 %>%
+  anti_join(d2)
 ```
 

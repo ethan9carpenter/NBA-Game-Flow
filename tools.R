@@ -16,8 +16,8 @@ get_colors_master <- function(){
           list(Abbreviation='PHX',
                City='Phoenix',
                Mascot='Suns')) %>%
-    mutate(full_name=paste(City, Mascot)) %>%
-    mutate(primary_color=sapply(full_name, function(x)team_pal(x, 1)),
+    mutate(full_name=paste(City, Mascot),
+           primary_color=sapply(full_name, function(x)team_pal(x, 1)),
            secondary_color=sapply(full_name, function(x)team_pal(x, 2)))
 }
 
@@ -44,18 +44,15 @@ add_image_annotation <- function(plot, img_path, y_loc, build){
   return (plot)
 }
 
-add_team_logos <- function(plot, h_team, v_team){
-  build <- ggplot_build(plot)
+get_colors <- function(game, colors_master, allow_dupe=FALSE){
+  colors <- list(home=colors_master[colors_master$Abbreviation==game$hTeam, 'primary_color'],
+                 away=colors_master[colors_master$Abbreviation==game$vTeam, 'primary_color'])
   
-  home_data <- build$data[[1]]$y
-  plot <- add_image_annotation(plot, paste0("team_logos/", h_team, ".png"), 
-                               home_data[length(home_data)], build)
+  #modify so if colors are too similar using euclidian distance between rgb values
+  if (colors$home==colors$away && !allow_dupe)
+    colors$away <- colors_master[colors_master$Abbreviation==game$vTeam, 'secondary_color']
   
-  away_data <- build$data[[2]]$y
-  plot <- add_image_annotation(plot, paste0("team_logos/", v_team, ".png"), 
-                               away_data[length(away_data)], build)
-  
-  return (plot)
+  return (colors)
 }
 
 get_plot_bounds <- function(plot){
