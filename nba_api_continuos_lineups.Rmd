@@ -29,13 +29,13 @@ knitr::opts_chunk$set(echo = TRUE)
 # Analyze closing vs. starting lineups
 # Add minutes player, +/-
 # Deal with OT
+# get rid of coord_flip
 # Add small plot at bottom that shows rolling +/-
 
-font_color <- 'white'
 font_family <- 'Verdana'
-game_date <- '2020-08-09'
+game_date <- '2020-08-10'
 
-games_dt <- get_games(game_date, c(2, 3))
+games_dt <- get_games(game_date, c(3))
 colors_master <- get_colors_master()
 
 for (game_id in games_dt$gameId){
@@ -54,23 +54,5 @@ plot_dt %>%
   ggplot(aes(y=n, x=seconds)) +
   geom_line() +
   scale_x_continuous(breaks=seq(1, 4)*12*60, labels=c('1Q', '2q', '3q', '4q'))
-pbp_dt %>%
-  filter(team_abr==team) %>%
-  rmarkdown::paged_table()
-new_dt %>%
-  filter(player=='Wright-Foreman') %>%
-  rmarkdown::paged_table()
-```
-```{r}
-pbp_dt
-pbp_dt %>%
-  filter(! (ExitPlayer %in% player_codes$player_code))
-```
-
-```{r}
-d1 <- data.frame(a=c(1, 2), b=c('a', 'b'))
-d2 <- data.frame(a=c(1, 3), b=c('a', 'c'))
-d1 %>%
-  anti_join(d2)
 ```
 

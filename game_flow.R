@@ -1,8 +1,7 @@
-game_flow_plot <- function(game, font_family, font_color, colors_master, win_size_sec, span,
+game_flow_plot <- function(pbp_dt, game, font_family, font_color, colors_master, win_size_sec, span,
                        show=TRUE, save=TRUE){
-  pbp_dt <- get_pbp_data(game$gameId, date) %>% 
-    prep_game_flow_dt()
-  
+  pbp_dt <- pbp_dt %>% 
+    .prep_game_flow_dt()
   if (max(pbp_dt$secElapsed) > win_size_sec){
     colors <- get_colors(game, colors_master)
   
@@ -21,7 +20,7 @@ game_flow_plot <- function(game, font_family, font_color, colors_master, win_siz
     if (show)    
       p %>% show()
     if (save)
-      ggsave(paste0('game_plots/', date, '-', game$hTeam, '-', game$vTeam, '-off_plot.png'), dpi=300)
+      ggsave(paste0('output_img/game_plots/', date, '-', game$hTeam, '-', game$vTeam, '-off_plot.png'))
     
     return (list(plot=p,
                  dt=pbp_dt))
@@ -68,14 +67,13 @@ game_flow_plot <- function(game, font_family, font_color, colors_master, win_siz
     mutate(leading=leading/sum(leading)) %>%
     filter(home_lead | away_lead) %>%
     mutate(abbr=ifelse(home_lead & !away_lead, game$hTeam, game$vTeam)) %>%
-    select(abbr, leading) %>%
     arrange(-leading)
   
   paste(dt[1, 'abbr'], scales::percent(unlist(dt[1, 'leading'])), '-',
         dt[2, 'abbr'], scales::percent((unlist(dt[2, 'leading']))))
 }
-prep_game_flow_dt <- function(pbp_dt){
-  pbp_dt <- get_pbp_data(game$gameId, date) %>% 
+.prep_game_flow_dt <- function(pbp_dt){
+  pbp_dt <- pbp_dt %>% 
     select(home_score, visitor_score, event, clock, period) %>%
     mutate(clock=sapply(clock, str_time_to_secs)) %>% 
     mutate_if(is.character, as.integer) %>%
@@ -135,12 +133,33 @@ prep_game_flow_dt <- function(pbp_dt){
   build <- ggplot_build(plot)
   
   home_data <- build$data[[1]]$y
-  plot <- add_image_annotation(plot, paste0("team_logos/", h_team, ".png"), 
+  plot <- .add_image_annotation(plot, get_team_logo(h_team), 
                                home_data[length(home_data)], build)
   
   away_data <- build$data[[2]]$y
-  plot <- add_image_annotation(plot, paste0("team_logos/", v_team, ".png"), 
+  plot <- .add_image_annotation(plot, get_team_logo(v_team),
                                away_data[length(away_data)], build)
   
+  return (plot)
+}
+
+.add_image_annotation <- function(plot, img, y_loc, build){
+  bounds <- get_plot_bounds(plot)
+
+  width <- ncol(img)
+  height <- nrow(img)
+  
+  x_scale <- (bounds$xmax-bounds$xmin) / (bounds$ymax-bounds$ymin) * height / width * .625
+  
+  x_width <- 400 / 2 * (bounds$xmax-bounds$xmin) / 2880
+  x_shift <- -60 * (bounds$xmax-bounds$xmin) / 2880
+  y_height <- x_width / x_scale
+  
+  plot <- plot +
+    annotation_raster(img,
+                      ymin=y_loc - y_height,
+                      ymax=y_loc +  y_height,
+                      xmin=bounds$xmax - x_width + x_shift,
+                      xmax=bounds$xmax + x_width + x_shift)
   return (plot)
 }

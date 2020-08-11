@@ -13,7 +13,13 @@ handle_names <- function(dt){
     dt <- dt %>% 
       mutate(description=gsub(' (ii|iii|iv|jr.|sr.) ', ' ', description),
              description=gsub(' (ii|iii|iv|jr.|sr.)$', '', description),
-             description=sub('marc morris', 'morris', description))
+             description=sub('marc morris', 'morris', description),
+             description=sub(' g hill', ' hill', description),
+             description=sub(' don ', ' doncic ', description))
   
   dt
+}
+
+.special_names <- function(x){
+  
 }

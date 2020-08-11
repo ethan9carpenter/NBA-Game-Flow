@@ -23,7 +23,7 @@ begin_modifying()
 
 ```{r warning=FALSE}
 #I have games starting in the 15-16 season
-date <- '2020-08-09'
+date <- '2020-08-10'
 win_size_sec <- 60 * 3
 
 games_dt <- get_games(date, c(2, 3))
@@ -33,9 +33,9 @@ span <- 0.4
 
 for (i in 1:nrow(games_dt)){
   game <- games_dt[i, ]
-  game_flow <- game_flow_plot(game, font_family, font_color, 
+  pbp_dt <- get_pbp_data(games_dt[i, 'gameId'], date)
+  game_flow <- game_flow_plot(pbp_dt, game, font_family, font_color, 
                               colors_master, win_size_sec, span, save=TRUE, show=TRUE)
-  dt <- game_flow$dt
 }
 
 # add game script
@@ -43,29 +43,8 @@ for (i in 1:nrow(games_dt)){
 # add time left / final to subtitle or title
 # move team logos towards middle of screen to avoid going off
 ```
-```{r}
-dt %>%
-  select(secElapsed, home_per_48, away_per_48) %>%
-  mutate(seconds=secElapsed-lag(secElapsed),
-         seconds=ifelse(is.na(seconds), secElapsed, seconds),
-         home_lead=home_per_48 > away_per_48) %>%
-  group_by(home_lead) %>%
-  summarize(seconds_leading=sum(seconds)) %>%
-  ungroup() %>%
-  mutate(percent_leading=seconds_leading/sum(seconds_leading))
-```
 
 ```{r}
 end_modifying()
-```
-
-```{r}
-unlockBinding("validate_element", asNamespace('ggplot2'))
-assign("validate_element", custom_validate_element, asNamespace('ggplot2'))
-lockBinding("validate_element", asNamespace('ggplot2'))
-
-unlockBinding("merge_element.element", asNamespace('ggplot2'))
-assign("merge_element.element", custom_merge_element, asNamespace('ggplot2'))
-lockBinding("merge_element.element", asNamespace('ggplot2'))
 ```
 

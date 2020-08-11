@@ -2,7 +2,6 @@
   pbp_dt <- master_pbp_dt %>%
     select(period, player_code) %>%
     distinct() %>%
-    filter(player_code != '') %>%
     mutate(player_code=map_chr(str_split(player_code, '_'), 2),
            player_code=player_code,
            period=as.integer(period))
@@ -34,24 +33,15 @@ nba_api_get_player_continuous_minutes <- function(player, pbp_dt, master_pbp_dt)
                      action=c(1, 1, -1, 1, -1, 1, -1, -1))) %>%
     arrange(secElapsed, action)
   
-  temp <- dt %>%
-    mutate(next_action=lead(action),
-           next_sec=lead(secElapsed))
-  
   to_rem <- data.frame(secElapsed=numeric(), action=numeric())
   
-  for (i in 1:(nrow(temp)-1))
-    if (temp[i, 'action'] == temp[i, 'next_action'])
-      if(temp[i, 'secElapsed'] %% 720 == 0){
-        val <- as.integer(temp[i, 'secElapsed'] %% 720 == 0)
-        to_rem <- to_rem %>%
-          rbind(data.frame(secElapsed=temp[i, 'secElapsed'],
-                           action=temp[i, 'action']))
-      } else {
-        to_rem <- to_rem %>%
-          rbind(data.frame(secElapsed=temp[i, 'next_sec'],
-                           action=temp[i, 'next_action']))
-      }
+  for (i in 1:(nrow(dt)-1))
+    if (dt[i, 'action'] == dt[i+1, 'action']){
+      val <- as.integer(dt[i, 'secElapsed'] %% 720 != 0)
+      to_rem <- to_rem %>%
+        rbind(data.frame(secElapsed=dt[i+val, 'secElapsed'],
+                         action=dt[i+val, 'action']))
+    }
   dt <- dt %>%
     anti_join(to_rem, by = c("secElapsed", "action")) %>%
     full_join(data.frame(secElapsed=0:2880), by=c('secElapsed')) %>%
@@ -76,7 +66,6 @@ nba_api_get_player_continuous_minutes <- function(player, pbp_dt, master_pbp_dt)
   for (i in 0:3){
     did_player_in_q <- master_pbp_dt %>%
       select(period, player_code) %>%
-      filter(player_code != '') %>%
       mutate(player_code=map_chr(str_split(player_code, '_'), 2),
              period=as.integer(period)) %>%
       filter(period==i+1,
@@ -89,21 +78,30 @@ nba_api_get_player_continuous_minutes <- function(player, pbp_dt, master_pbp_dt)
   return (dt)
 }
 
-get_continous_lineups <- function(master_pbp_dt){
-  return_data <- list()
-  
-  for (team in unique(master_pbp_dt$team_abr)){
-    pbp_dt <- master_pbp_dt %>%
-      select(player_code, person_id, description, period, clock, team_abr) %>%
-      filter(stringr::str_detect(description, 'substitution'), team_abr==team) %>%
+.extract_enter_exit_names <- function(pbp_dt){
+  pbp_dt %>%
+    filter(stringr::str_detect(description, 'substitution')) %>%
       mutate(players=stringr::str_split(description, ' substitution replaced by '),
              EnterPlayer=purrr::map_chr(players, 2),
              ExitPlayer=purrr::map_chr(players, 1),
-             ExitPlayer=purrr::map_chr(stringr::str_split(ExitPlayer, '] '), 2),
-             clock=sapply(clock, str_time_to_secs),
-             period=as.integer(period),
-             secElapsed=pmin(period, 4)*60*12 + pmax(period-4, 0)*60*5 - clock) %>%
-      select(player_code, person_id, team_abr, EnterPlayer, ExitPlayer, secElapsed)
+             ExitPlayer=purrr::map_chr(stringr::str_split(ExitPlayer, '] '), 2))
+}
+
+get_continous_lineups <- function(master_pbp_dt){
+  return_data <- list()
+  master_pbp_dt <- master_pbp_dt %>%
+    filter(player_code != '' )
+  
+  pbp_dt_both_teams <- master_pbp_dt %>%
+    .extract_enter_exit_names() %>%
+    mutate(clock=sapply(clock, str_time_to_secs),
+           period=as.integer(period),
+           secElapsed=pmin(period, 4)*60*12 + pmax(period-4, 0)*60*5 - clock) %>%
+    select(player_code, person_id, team_abr, EnterPlayer, ExitPlayer, secElapsed)
+  
+  for (team in unique(master_pbp_dt$team_abr)){
+    pbp_dt <- pbp_dt_both_teams %>%
+      filter(team_abr==team)
     all_minutes <- data.frame(secElapsed=0:2880)
     
     players <- select(pbp_dt, EnterPlayer) %>%
@@ -112,11 +110,10 @@ get_continous_lineups <- function(master_pbp_dt){
       unique()
     
     for (player in players){
-      minutes <- nba_api_get_player_continuous_minutes(player, pbp_dt, master_pbp_dt) %>%
+      all_minutes <- nba_api_get_player_continuous_minutes(player, pbp_dt, master_pbp_dt) %>%
         mutate(!!player := is_in_game) %>%
-        select(-is_in_game)
-      all_minutes <- all_minutes %>%
-        full_join(minutes, by=c('secElapsed'='secElapsed'))
+        select(-is_in_game) %>%
+        full_join(all_minutes, by=c('secElapsed'='secElapsed'))
     }
     all_minutes[is.na(all_minutes)] <- 0
     return_data[[team]] <- all_minutes
@@ -125,7 +122,7 @@ get_continous_lineups <- function(master_pbp_dt){
   return (return_data)
 }
 
-get_lineup_player_codes <- function(pbp_dt){
+.get_lineup_player_codes <- function(pbp_dt){
    pbp_dt %>%
     select(person_id, player_code, team_abr) %>%
     distinct() %>%
@@ -136,7 +133,7 @@ get_lineup_player_codes <- function(pbp_dt){
 
 get_substitution_plots <- function(pbp_dt, font_family, colors_master, show=TRUE, save=TRUE){
   master_dt <- get_continous_lineups(pbp_dt)
-  master_player_codes <- get_lineup_player_codes(pbp_dt)
+  master_player_codes <- .get_lineup_player_codes(pbp_dt)
   
   for (team in names(master_dt)){
     dt <- master_dt[[team]]
@@ -147,17 +144,16 @@ get_substitution_plots <- function(pbp_dt, font_family, colors_master, show=TRUE
     
     player_codes <- master_player_codes %>%
       filter(team_abr==team)
+    
     colnames(dt) <- map_chr(str_split(colnames(dt), ' '), 1)
     dt <- dt[, colnames(dt) %in% player_codes$player_code]
-    
+    dt <- dt[sort(colnames(dt), TRUE)]
     
     new_dt <- data.frame(player=character(),
                          in_game=numeric(),
                          n=numeric(),
                          person_id=character(),
-                         team_abr=character(),
                          seconds=numeric())
-    dt <- dt[sort(colnames(dt), TRUE)]
     
     for (i in 1:length(colnames(dt))){
       col <- colnames(dt)[[i]]
@@ -173,8 +169,7 @@ get_substitution_plots <- function(pbp_dt, font_family, colors_master, show=TRUE
           rbind(data.frame(player=col,
                            in_game=dt[[col]],
                            n=i,
-                           person_id=player_info,
-                           team_abr=team,
+                           person_id=player_info[[1]],
                            seconds=0:(nrow(dt)-1)))
     }
     
@@ -189,15 +184,33 @@ get_substitution_plots <- function(pbp_dt, font_family, colors_master, show=TRUE
       as.vector()
     
     p <- ggplot(plot_dt) +
+      geom_rect(data = data.frame(ystart = c(-Inf, seq(0, 4) * 12 * 60, Inf), 
+                                  yend= c(-Inf, seq(1, 4) * 12 * 60, 3180, Inf), 
+                                  col = as.character(seq(1, 7) %% 2)), 
+                aes(xmin = -Inf, xmax = Inf, ymin = ystart, ymax = yend, fill = col), 
+                alpha = 0.4) +
       geom_rect(aes(xmin=n-1,
                     xmax=n,
                     ymin=seconds,
                     ymax=seconds+1),
-                fill=color$primary_color) +
-      geom_hline(yintercept=seq(1, 4)*60*12, color=color$secondary_color) +
+                fill=color$primary_color,
+                alpha=1) +
+      #geom_hline(yintercept=seq(0, 4)*60*12, color=color$secondary_color) +
+      ggtitle(paste(toupper(team), 'Substitutions')) +
+      scale_y_continuous(breaks=1:4 * 720, 
+                         labels=c('End Q1', 'End Q2', 'End Q3', 'End Q4'),
+                         limits=c(0, max(plot_dt$seconds)+10)) +
+      scale_x_continuous(labels=tools::toTitleCase(labels),
+                         breaks=1:length(labels) - 0.5,
+                         limits=c(0, max(plot_dt$n))) +
+      annotation_raster(get_team_logo(team),
+                        ymin=3000-1.75*max(plot_dt$seconds)/max(plot_dt$n),
+                        ymax=3000,
+                        xmin=length(labels)-1.75,
+                        xmax=length(labels)+.5) +
       theme(legend.position = 'none',
             panel.grid.major.y = element_blank(),
-            panel.grid.major.x = element_line(color=color$secondary_color),
+            panel.grid.major.x = element_blank(),
             plot.background = element_rect(fill=color$primary_color, 
                                            color=color$primary_color),
             text = element_text(color=font_color,
@@ -207,17 +220,7 @@ get_substitution_plots <- function(pbp_dt, font_family, colors_master, show=TRUE
                                      face='bold',
                                      family=font_family),
             panel.border = element_rect(color=color$secondary_color, fill='transparent', size=1)) +
-      ggtitle(paste(toupper(team), 'Substitutions')) +
-      scale_y_continuous(breaks=1:4 * 720, 
-                         labels=c('End Q1', 'End Q2', 'End Q3', 'End Q4')) +
-      scale_x_continuous(labels=tools::toTitleCase(labels),
-                         breaks=1:length(labels) - 0.5,
-                         limits=c(0, max(plot_dt$n))) +
-      annotation_raster(png::readPNG(paste0('team_logos/', toupper(team), '.png')),
-                        ymin=2880-470,
-                        ymax=2880+100,
-                        xmin=length(labels)-1.75,
-                        xmax=length(labels)+.5) +
+      scale_fill_manual(values=rep(c('#b3b3b3', 'white'), 4)) +
       coord_flip()
     
     p <- .add_headshots(p, plot_dt)
@@ -225,7 +228,7 @@ get_substitution_plots <- function(pbp_dt, font_family, colors_master, show=TRUE
     if (show)
       p %>% show()
     if (save)
-      ggsave(paste0('substitution_plots/', team, game_id, 'sub_plot.png'))
+      ggsave(paste0('output_img/substitution_plots/', team, game_id, 'sub_plot.png'))
   }
 }
 
@@ -237,7 +240,7 @@ get_substitution_plots <- function(pbp_dt, font_family, colors_master, show=TRUE
       distinct() %>%
       unlist()
     
-    if (length(player_code) > 0)
+    if (length(player_code) > 0 & player_code != '1628778')
       p <- p +
         annotation_raster(get_player_headshot(player_code),
                           i-1, i,

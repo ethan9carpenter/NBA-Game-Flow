@@ -27,33 +27,33 @@ get_nba_date_id <- function(date){
   format(as.Date(date), format='%Y%m%d')
 }
 
+get_team_logo <- function(team_abr){
+  .check_api_then_save_local(
+    paste0('input_img/team_logos/', tolower(team_abr), '.png'),
+    paste0('https://a.espncdn.com/i/teamlogos/nba/500/',
+           tolower(team_abr), '.png'))
+}
+
 get_player_headshot <- function(player_id){
-  if (file.exists(paste0('player_headshots/', player_id, '.png')))
-    file <- paste0('player_headshots/', player_id, '.png')
-  else {
-    url <- paste0('https://ak-static.cms.nba.com/wp-content/uploads/headshots/nba/latest/260x190/',
-                  player_id, '.png')
-    file <- RCurl::getURLContent(url)
-  }
-  img <- png::readPNG(file)
-  
-  if (!file.exists(paste0('player_headshots/', player_id, '.png')))
-    writePNG(img, paste0('player_headshots/', player_id, '.png'))
-  
-  return (img)
+  .check_api_then_save_local(
+    paste0('input_img/player_headshots/', player_id, '.png'),
+    paste0('https://ak-static.cms.nba.com/wp-content/uploads/headshots/nba/latest/260x190/',
+                                    player_id, '.png'))
 }
 
 get_player_action_shot <- function(player_id){
-  if (file.exists(paste0('player_action_shots/', player_id, '.png')))
-    file <- paste0('player_action_shots/', player_id, '.png')
-  else {
-    url <- paste0('https://ak-static.cms.nba.com/wp-content/uploads/silos/nba/latest/440x700/',
-                  player_id, '.png')
-    file <- RCurl::getURLContent(url)
-  }
-  img <- png::readPNG(file)
-  if (!file.exists(paste0('player_action_shots/', player_id, '.png')))
-    writePNG(img, paste0('player_action_shots/', player_id, '.png'))
+  .check_api_then_save_local(
+    paste0('input_img/player_action_shots/', player_id, '.png'),
+    paste0('https://ak-static.cms.nba.com/wp-content/uploads/silos/nba/latest/440x700/',
+           player_id, '.png'))
+}
+
+.check_api_then_save_local <- function(fp, url){
+  if (!file.exists(fp)){
+    img <- png::readPNG(RCurl::getURLContent(url))
+    writePNG(img, fp)
+  } else
+    img <- png::readPNG(fp)
   
   return (img)
 }
